@@ -1,0 +1,9 @@
+services:
+  - type: worker
+    name: wa-radar
+    env: node
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: TOKEN
+        value: "تغيير_هذا_بعد_الرفع"
