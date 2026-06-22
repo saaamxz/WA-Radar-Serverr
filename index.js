@@ -5,13 +5,20 @@ const fs = require('fs');
 const FormData = require('form-data');
 require('dotenv').config();
 
+// قراءة الإعدادات من متغيرات السيرفر
 const TG_TOKEN = process.env.TG_TOKEN;
 const TG_CHAT_ID = process.env.TG_CHAT_ID;
+
+// حماية: إذا لم توجد المتغيرات، لا يبدأ البوت
+if (!TG_TOKEN || !TG_CHAT_ID) {
+    console.error("❌ ERROR: Missing TG_TOKEN or TG_CHAT_ID in Environment Variables!");
+    process.exit(1);
+}
+
 const messageLog = new Map();
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
-    takeoverOnConflict: true,
+    authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }), // حفظ الجلسة في ملف
     puppeteer: {
         headless: true,
         args: [
@@ -44,13 +51,10 @@ client.on('qr', async (qr) => {
 
 client.on('ready', () => {
     console.log('🛡️ WhatsApp Radar is active!');
-    if (fs.existsSync('./whatsapp-qr.png')) fs.unlinkSync('./whatsapp-qr.png');
 });
 
-// [تعديل هام] التقاط الرسالة فور وصولها وتخزينها
 client.on('message', async (msg) => {
-    // تخزين الرسائل النصية فقط حالياً
-    if (msg.hasMedia) return; // اختياري: تجاهل الوسائط لتوفير الذاكرة
+    if (msg.hasMedia) return;
 
     const contact = await msg.getContact();
     messageLog.set(msg.id.id, {
@@ -59,21 +63,17 @@ client.on('message', async (msg) => {
         time: new Date().toLocaleTimeString()
     });
 
-    // تنظيف الذاكرة
-    if (messageLog.size > 500) {
+    // تقليل حجم الذاكرة (إبقاء آخر 200 رسالة فقط)
+    if (messageLog.size > 200) {
         const firstKey = messageLog.keys().next().value;
         messageLog.delete(firstKey);
     }
 });
 
-// [تعديل هام] اكتشاف الحذف
 client.on('message_revoke_everyone', async (after, before) => {
     if (before && messageLog.has(before.id.id)) {
         const originalMsg = messageLog.get(before.id.id);
-        const text = `🚨 *Deleted Message Detected!*
-👤 *Sender:* ${originalMsg.sender}
-📩 *Message:* ${originalMsg.body}
-🕒 *Time:* ${originalMsg.time}`;
+        const text = `🚨 *Deleted Message Detected!*\n👤 *Sender:* ${originalMsg.sender}\n📩 *Message:* ${originalMsg.body}\n🕒 *Time:* ${originalMsg.time}`;
 
         try {
             await axios.post(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
@@ -81,13 +81,12 @@ client.on('message_revoke_everyone', async (after, before) => {
                 text: text,
                 parse_mode: 'Markdown'
             });
-            console.log(`🚀 Alert sent.`);
         } catch (e) {
-            console.error("Telegram Error:", e.message);
+            console.error("Telegram API Error:", e.message);
         }
     }
 });
 
-process.on('unhandledRejection', (reason) => console.log('⚠️ Error:', reason));
+process.on('unhandledRejection', (reason) => console.error('⚠️ Unhandled Rejection:', reason));
 
 client.initialize();
